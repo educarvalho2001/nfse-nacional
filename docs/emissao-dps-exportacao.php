@@ -128,11 +128,15 @@ $xml = (new DpsXml($dps))->renderDps();
 
 echo $xml, PHP_EOL, PHP_EOL;
 
-// ── Conferência contra o XSD ────────────────────────────────────────────────
+// ── Conferência contra o XSD da versão que a DPS declara ────────────────────
+// O atributo `versao` da raiz diz qual schema vale — é o que o Sefin usa.
+preg_match('#<DPS[^>]*versao="([^"]+)"#', $xml, $m);
+$versao = $m[1] ?? '1.00';
+
 libxml_use_internal_errors(true);
 $doc = new DOMDocument();
 $doc->loadXML($xml);
-$doc->schemaValidate(__DIR__ . '/../src/Resources/danfse/schemas/1.01/DPS_v1.01.xsd');
+$doc->schemaValidate(__DIR__ . "/../src/Resources/danfse/schemas/{$versao}/DPS_v{$versao}.xsd");
 
 $erros = array_map(
     static fn (LibXMLError $e): string => trim($e->message),
@@ -141,15 +145,14 @@ $erros = array_map(
 libxml_clear_errors();
 
 if ($erros === []) {
-    echo "XML valido contra o DPS_v1.01.xsd.", PHP_EOL;
+    echo "XML valido contra o DPS_v{$versao}.xsd.", PHP_EOL;
     exit(0);
 }
 
-/* Aviso: o TSSerieDPS do schema 1.01 traz o padrão `^0{0,4}\d{1,5}$`. Em XML
-   Schema o pattern já é ancorado, então `^` e `$` valem como caracteres
-   literais e nenhuma série numérica casa — é o único dos 54 padrões do schema
-   escrito assim, e no 1.00 esse tipo não tinha padrão nenhum. Quem validar
-   localmente vai ver esta recusa mesmo numa DPS correta. */
+/* Se for validar contra o schema 1.01 em vez da versão declarada: o
+   TSSerieDPS dele traz o padrão `^0{0,4}\d{1,5}$`. Em XML Schema o pattern já
+   é ancorado, então `^` e `$` valem como caracteres literais e nenhuma série
+   numérica casa — é o único dos 54 padrões do schema escrito assim. */
 foreach ($erros as $erro) {
     echo '  · ', $erro, PHP_EOL;
 }

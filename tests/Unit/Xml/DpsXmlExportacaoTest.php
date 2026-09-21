@@ -40,29 +40,44 @@ final class DpsXmlExportacaoTest extends TestCase
     private const FLORIANOPOLIS = 4205407;
 
     /**
-     * O `TSSerieDPS` do schema 1.01 traz `^0{0,4}\d{1,5}$`.
+     * Valida contra o schema da versão que a própria DPS DECLARA.
      *
-     * Em XML Schema o `pattern` já é ancorado, então `^` e `$` valem como
-     * caracteres literais e NENHUMA série casa. É o único dos 54 padrões do
-     * schema escrito assim, e no 1.00 o mesmo tipo não tinha padrão nenhum.
+     * É o que o Sefin faz: o atributo `versao` da raiz diz qual schema vale.
+     * Validar contra outra versão testaria uma regra que não se aplica ao
+     * documento — e foi o que aconteceu na primeira forma deste teste, que
+     * usava o 1.01 e precisava tolerar um erro do próprio schema (ver
+     * `testSchema101RecusaQualquerSerieNumerica`).
      *
-     * A constante existe para que o teste tolere esse erro — e só ele. Se o
-     * schema for corrigido, ou se aparecer qualquer outra recusa, o teste
-     * falha e conta o que mudou.
+     * Tolerância zero: qualquer recusa falha o teste.
      */
-    private const ERRO_CONHECIDO_DO_SCHEMA = 'serie';
-
-    public function testExportacaoDeServicoGeraXmlValidoContraOSchema(): void
+    public function testExportacaoDeServicoValidaContraOSchemaDaVersaoDeclarada(): void
     {
         $xml = $this->dpsDeExportacao();
 
-        $erros = $this->validarContraSchema($xml);
-        $inesperados = array_filter(
-            $erros,
-            static fn (string $e): bool => !str_contains($e, self::ERRO_CONHECIDO_DO_SCHEMA)
-        );
+        $versao = $this->versaoDeclarada($xml);
+        $erros  = $this->validarContraSchema($xml, $versao);
 
-        self::assertSame([], array_values($inesperados), implode(' | ', $inesperados));
+        self::assertSame([], $erros, "schema {$versao}: " . implode(' | ', $erros));
+    }
+
+    /**
+     * Registra, como fato, o defeito do schema 1.01 — que não é desta
+     * biblioteca, mas morde quem validar contra ele.
+     *
+     * O `TSSerieDPS` do 1.01 traz `^0{0,4}\d{1,5}$`. Em XML Schema o `pattern`
+     * já é ancorado, então `^` e `$` valem como caracteres literais e NENHUMA
+     * série numérica casa. É o único dos 54 padrões do schema escrito assim,
+     * e no 1.00 o mesmo tipo não tinha padrão nenhum.
+     *
+     * Se o schema empacotado for corrigido, este teste falha — e é esse o
+     * aviso de que ele pode ser apagado.
+     */
+    public function testSchema101RecusaQualquerSerieNumerica(): void
+    {
+        $erros = $this->validarContraSchema($this->dpsDeExportacao(), '1.01');
+
+        self::assertCount(1, $erros, implode(' | ', $erros));
+        self::assertStringContainsString('serie', $erros[0]);
     }
 
     public function testLocalDePrestacaoNoExteriorNaoEmiteMunicipio(): void
@@ -104,7 +119,7 @@ final class DpsXmlExportacaoTest extends TestCase
         self::assertStringContainsString('<vServ>515.75</vServ>', $xml);
     }
 
-    public function testComExterioTrazOsObrigatoriosMesmoSemOChamadorInformar(): void
+    public function testComExteriorTrazOsObrigatoriosMesmoSemOChamadorInformar(): void
     {
         $xml = $this->dpsDeExportacao();
 
@@ -256,8 +271,16 @@ final class DpsXmlExportacaoTest extends TestCase
         return (new DpsXml($dps))->renderDps();
     }
 
+    private function versaoDeclarada(string $xml): string
+    {
+        self::assertMatchesRegularExpression('#<DPS[^>]*versao="([^"]+)"#', $xml);
+        preg_match('#<DPS[^>]*versao="([^"]+)"#', $xml, $m);
+
+        return $m[1];
+    }
+
     /** @return list<string> */
-    private function validarContraSchema(string $xml): array
+    private function validarContraSchema(string $xml, string $versao): array
     {
         $anterior = libxml_use_internal_errors(true);
         libxml_clear_errors();
@@ -265,7 +288,7 @@ final class DpsXmlExportacaoTest extends TestCase
         $doc = new DOMDocument();
         $doc->loadXML($xml);
         $doc->schemaValidate(
-            dirname(__DIR__, 3) . '/src/Resources/danfse/schemas/1.01/DPS_v1.01.xsd'
+            dirname(__DIR__, 3) . "/src/Resources/danfse/schemas/{$versao}/DPS_v{$versao}.xsd"
         );
 
         $erros = array_map(
